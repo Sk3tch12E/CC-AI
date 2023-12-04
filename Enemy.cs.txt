@@ -1,0 +1,245 @@
+﻿using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.AI;
+
+public class Enemy : Character
+{
+    [Header("General")]
+    [SerializeField] private LayerMask whatIsPlayer;
+    [SerializeField] private LayerMask whatIsGround;
+    [SerializeField] private GameObject player;
+    [SerializeField] private Collider walkBounds;
+    
+    void Awake()
+    {
+        agent = GetComponent<NavMeshAgent>();
+    }
+
+    protected override void Start()
+    {
+        base.Start();
+        player = GameObject.FindWithTag("Player");
+        whatIsPlayer = LayerMask.GetMask("Player");
+        whatIsGround = LayerMask.GetMask("InBuilding");
+        walkRange = 20;
+        sightRange = 10;
+        attackRange = 5;
+        walkBounds = GameObject.Find("WalkBounds").GetComponent<Collider>();
+        bulletSpawn = GetComponentInChildren<Transform>();
+        bulletPrefab = Resources.Load("Bullet") as GameObject;
+        damage = 1;
+    }
+
+    #region
+
+    //private bool hasSeenPlayer = false;
+    //private bool canCurrentlySeePlayer = false;
+    //private Vector3 lastSeenPos;
+    //// Update is called once per frame
+    //void Update()
+    //{
+    //    Debug.DrawLine(this.transform.position, agent.destination);
+    //    ///Check if the enemy can see the player
+    //    ///if not check if they have seen the player
+    //    ///otherwise wander around
+
+    //    //send out raycast to see if it hits the player
+    //    if (Physics.Raycast(this.transform.position, this.transform.forward) == gameObject.CompareTag("Player"))
+    //    {
+    //        canCurrentlySeePlayer = true;
+    //        hasSeenPlayer = true;
+    //        Vector3 lastSeenPos = player.transform.position;
+    //        goal = lastSeenPos;
+    //        Debug.Log("seen Player");
+    //        //walk to player/shoot them
+    //        //Debug.Log("Has just seen player");
+    //    }
+    //    else if (hasSeenPlayer)
+    //    {
+    //        //walk to last known pos
+    //        //if they make it to the last know pos and cannot see the player, go back to wander and reset
+    //        goal = lastSeenPos;//maybe not needed???
+    //        if (agent.destination == this.transform.position)
+    //        {
+    //            hasSeenPlayer = false;
+    //        }
+    //    }
+    //    else //if has not seen the player
+    //    {
+    //        //check to see if they are at the current goal.
+    //        //if so calculate a new goal
+    //        if (agent.destination == this.transform.position)
+    //        {
+    //            //wonder around
+    //            Wander();
+    //        }
+    //    }
+
+    //    //Debug.Log("goal changed to:" + goal);
+    //    agent.destination = goal;
+    //}
+
+    //Vector3 randomPointInBox(Bounds bounds)
+    //{
+    //    return new Vector3(
+    //    Random.Range(bounds.min.x, bounds.max.x),
+    //    1.6f, //this is the y value of the player
+    //    Random.Range(bounds.min.z, bounds.max.z));
+    //}
+
+    //void Wander()
+    //{
+    //    //goal = randomPointInBox(area.GetComponent<Collider>().bounds);
+    //}
+
+    //void ShootAtPlayer()
+    //{
+    //    //
+    //}
+    #endregion
+
+    [Header("AI")]
+    public NavMeshAgent agent;
+
+    [SerializeField] float sightRange = 10, attackRange = 5, walkRange = 20;
+    bool playerInSightRange = false, playerInAttackRange = false;
+    [SerializeField] float timeBetweenAttacks = 5;
+    [SerializeField] private int damage;
+
+    bool alreadyAttacked = false;
+    bool isAttacking = false;
+    
+    bool walkPointSet = false;
+    Vector3 walkPoint;
+
+    private void Update()
+    {
+        playerInSightRange = false;
+        playerInAttackRange = false;
+        RaycastHit hit;
+        //check if the enemy can see the player
+        if (Physics.Linecast(transform.position, player.transform.position, out hit, whatIsPlayer))
+        {
+            //Debug.Log("seen player");
+            Vector3 distance = transform.position - player.transform.position;
+            if (distance.magnitude < attackRange)//check distance between them
+            {
+                playerInAttackRange = true;
+            }
+            if (distance.magnitude < sightRange)//check distance between them
+            {
+                playerInSightRange = true;
+            }
+        }
+        //CanSeePlayer();
+        //Debug.Log(hit);
+        if (!isAttacking)
+        {
+            if (!playerInSightRange && !playerInAttackRange) Patroling();
+            if (playerInSightRange && !playerInAttackRange) ChasePlayer();
+            if (playerInSightRange && playerInAttackRange) AttackPlayer();
+        }
+    }
+
+    bool CanSeePlayer()
+    {
+        bool val = false;
+        RaycastHit hit; 
+        Physics.Raycast(transform.position, player.transform.position, out hit);
+        if (!hit.collider.gameObject.CompareTag("Wall"))
+        {
+            Debug.Log("see player");
+            return val;
+        }
+        Debug.Log("cannot see player");
+
+
+        return val;
+    }
+
+
+    private void Patroling()
+    {
+        //Debug.Log("patrol");
+        agent.isStopped = false;
+
+        if (!walkPointSet) SearchWalkPoint();
+        else agent.SetDestination(walkPoint);
+
+        Vector3 distance = transform.position - walkPoint;
+        //walk point reached
+        if (distance.magnitude < 1)
+            walkPointSet = false;
+    }
+
+    private void SearchWalkPoint()
+    {
+        Bounds bounds = walkBounds.bounds;
+        //Debug.Log("searching point");
+        //generate a list of possible positions
+        bool valid = false;
+        while (!valid) 
+        {
+            walkPoint = new Vector3(
+                Random.Range(bounds.min.x, bounds.max.x),
+                1f,
+                Random.Range(bounds.min.y, bounds.max.y));
+            if (!Physics.CheckSphere(walkPoint, 0.3f))
+            {
+                valid = true;
+            }
+                
+        }
+
+        walkPointSet = true;
+    }
+    
+    private void ChasePlayer()
+    {
+        //Debug.Log("chase");
+        agent.isStopped = false;
+        agent.SetDestination(player.transform.position);
+    }
+
+
+    public GameObject bulletPrefab;
+    public Transform bulletSpawn;
+
+    private void AttackPlayer()
+    { //stop from moving then shoot. 
+        //Debug.Log("attacking");
+        isAttacking = true;
+        Shoot();
+        StartCoroutine(ShootWait());
+        agent.isStopped = true;
+    }
+    IEnumerator ShootWait()
+    {   
+        yield return new WaitForSeconds(timeBetweenAttacks);
+        
+
+        isAttacking = false;
+    }
+    private void Shoot()
+    {
+        transform.LookAt(player.transform);
+        GameObject bullet = ObjectPooler.Instance.SpawnFromPool("Bullet", transform.position + (Vector3.up * 1.3f) + transform.forward * 1.1f, transform.rotation, true);
+
+        // = Instantiate(bulletPrefab, bulletSpawn.position, transform.rotation);
+        bullet.GetComponent<Bullet>().Damage = damage;
+    }
+
+    public override void OnDeath()
+    {
+        //alert game logic that an enemy has died, and then work out if there are any left
+        gamelogic.numOfAliveEnemies--;
+        if (gamelogic.numOfAliveEnemies <= 0) 
+        {
+            gamelogic.SetbIsUnderAttack(false);
+        }
+        GameObject.Find("ObjectPooler").GetComponent<ObjectPooler>().SpawnFromPool("Meat", transform.position, Quaternion.identity, true); //spawn meat on death, do we want to requeue? not really sure if its needed or not but lets go for it
+        base.OnDeath();
+    }
+
+}
